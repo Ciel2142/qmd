@@ -5,6 +5,17 @@ import { tmpdir } from "node:os";
 import { afterEach, describe, expect, test } from "vitest";
 import { findLocalConfigPath, getLocalDbPath } from "../src/collections.js";
 
+function cliCommandArgs(command: string): { bin: string; args: string[] } {
+  const cliPath = join(process.cwd(), "src/cli/qmd.ts");
+  if (process.versions.bun) {
+    return { bin: process.execPath, args: [cliPath, command] };
+  }
+  return {
+    bin: process.execPath,
+    args: [join(process.cwd(), "node_modules/tsx/dist/cli.mjs"), cliPath, command],
+  };
+}
+
 const roots: string[] = [];
 
 function tempProject(): string {
@@ -59,9 +70,8 @@ describe("local .qmd project config", () => {
     writeFileSync(join(root, ".qmd", "index.yaml"), `collections:\n  docs:\n    path: ${JSON.stringify(join(root, "docs"))}\n    pattern: "**/*.md"\n    context:\n      /: Local test docs\nmodels:\n  embed: local-embed-model\n  rerank: local-rerank-model\n  generate: local-generate-model\n`);
 
     const home = join(root, "home");
-    const tsxBin = join(process.cwd(), "node_modules", ".bin", "tsx");
-    const runner = existsSync(tsxBin) ? tsxBin : "bun";
-    const output = execFileSync(runner, [join(process.cwd(), "src/cli/qmd.ts"), "status"], {
+    const { bin, args } = cliCommandArgs("status");
+    const output = execFileSync(bin, args, {
       cwd: root,
       encoding: "utf-8",
       env: {

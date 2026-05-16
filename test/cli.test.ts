@@ -27,14 +27,15 @@ let testCounter = 0; // Unique counter for each test run
 const thisDir = dirname(fileURLToPath(import.meta.url));
 const projectRoot = join(thisDir, "..");
 const qmdScript = join(projectRoot, "src", "cli", "qmd.ts");
-// Resolve tsx binary from project's node_modules (not cwd-dependent)
-const tsxBin = (() => {
-  const candidate = join(projectRoot, "node_modules", ".bin", "tsx");
-  if (existsSync(candidate)) {
-    return candidate;
-  }
-  return join(process.cwd(), "node_modules", ".bin", "tsx");
-})();
+const isBunRuntime = typeof (globalThis as { Bun?: unknown }).Bun !== "undefined";
+const tsxCli = join(projectRoot, "node_modules", "tsx", "dist", "cli.mjs");
+const qmdCommand = isBunRuntime
+  ? { command: process.execPath, args: [qmdScript] }
+  : { command: process.execPath, args: [tsxCli, qmdScript] };
+
+function qmdRunnerArgs(args: string[]): { command: string; args: string[] } {
+  return { command: qmdCommand.command, args: [...qmdCommand.args, ...args] };
+}
 
 // Helper to run qmd command with test database
 async function runQmd(
@@ -44,7 +45,8 @@ async function runQmd(
   const workingDir = options.cwd || fixturesDir;
   const dbPath = options.dbPath || testDbPath;
   const configDir = options.configDir || testConfigDir;
-  const proc = spawn(tsxBin, [qmdScript, ...args], {
+  const runner = qmdRunnerArgs(args);
+  const proc = spawn(runner.command, runner.args, {
     cwd: workingDir,
     env: {
       ...process.env,
@@ -252,15 +254,15 @@ describe("CLI Skills", () => {
     expect(stderr).toBe("");
     expect(exitCode).toBe(0);
     expect(stdout).toContain("qmd");
-    expect(stdout).toContain("Search markdown knowledge bases");
+    expect(stdout).toContain("Search local markdown knowledge bases");
   });
 
   test("gets version-matched runtime skill content", async () => {
     const { stdout, stderr, exitCode } = await runQmd(["skills", "get", "qmd"]);
     expect(stderr).toBe("");
     expect(exitCode).toBe(0);
-    expect(stdout).toContain("# QMD - Quick Markdown Search");
-    expect(stdout).toContain("## MCP: `query`");
+    expect(stdout).toContain("# QMD - Query Markdown Documents");
+    expect(stdout).toContain("## MCP Tool: `query`");
     expect(stdout).not.toContain("This file is a discovery stub");
   });
 
@@ -268,7 +270,7 @@ describe("CLI Skills", () => {
     const { stdout, stderr, exitCode } = await runQmd(["skills", "get", "qmd", "--full"]);
     expect(stderr).toBe("");
     expect(exitCode).toBe(0);
-    expect(stdout).toContain("# QMD - Quick Markdown Search");
+    expect(stdout).toContain("# QMD - Query Markdown Documents");
     expect(stdout).toContain("--- references/mcp-setup.md ---");
     expect(stdout).toContain("# QMD MCP Server Setup");
   });
@@ -284,8 +286,8 @@ describe("CLI Skills", () => {
     const { stdout, stderr, exitCode } = await runQmd(["skill", "show"]);
     expect(stderr).toBe("");
     expect(exitCode).toBe(0);
-    expect(stdout).toContain("# QMD - Quick Markdown Search");
-    expect(stdout).toContain("## MCP: `query`");
+    expect(stdout).toContain("# QMD - Query Markdown Documents");
+    expect(stdout).toContain("## MCP Tool: `query`");
     expect(stdout).not.toContain("This file is a discovery stub");
   });
 
@@ -300,8 +302,8 @@ describe("CLI Skills", () => {
 
     const installedSkillDir = join(installDir, ".agents", "skills", "qmd");
     const installed = readFileSync(join(installedSkillDir, "SKILL.md"), "utf8");
-    expect(installed).toContain("# QMD - Quick Markdown Search");
-    expect(installed).toContain("## MCP: `query`");
+    expect(installed).toContain("# QMD - Query Markdown Documents");
+    expect(installed).toContain("## MCP Tool: `query`");
     expect(installed).not.toContain("This file is a discovery stub");
     expect(readFileSync(join(installedSkillDir, "references", "mcp-setup.md"), "utf8")).toContain("# QMD MCP Server Setup");
   });
@@ -370,7 +372,7 @@ describe("CLI Skill Commands", () => {
     expect(exitCode).toBe(0);
 
     const skillDir = join(projectDir, ".agents", "skills", "qmd");
-    expect(readFileSync(join(skillDir, "SKILL.md"), "utf-8")).toContain("# QMD - Quick Markdown Search");
+    expect(readFileSync(join(skillDir, "SKILL.md"), "utf-8")).toContain("# QMD - Query Markdown Documents");
     expect(existsSync(join(projectDir, ".claude", "skills", "qmd"))).toBe(false);
     expect(stdout).toContain(`✓ Installed QMD skill to ${skillDir}`);
     expect(stdout).toContain("Tip: create a Claude symlink manually");
@@ -388,9 +390,9 @@ describe("CLI Skill Commands", () => {
     const skillDir = join(fakeHome, ".agents", "skills", "qmd");
     const claudeLink = join(fakeHome, ".claude", "skills", "qmd");
 
-    expect(readFileSync(join(skillDir, "SKILL.md"), "utf-8")).toContain("# QMD - Quick Markdown Search");
+    expect(readFileSync(join(skillDir, "SKILL.md"), "utf-8")).toContain("# QMD - Query Markdown Documents");
     expect(lstatSync(claudeLink).isSymbolicLink()).toBe(true);
-    expect(readFileSync(join(claudeLink, "SKILL.md"), "utf-8")).toContain("# QMD - Quick Markdown Search");
+    expect(readFileSync(join(claudeLink, "SKILL.md"), "utf-8")).toContain("# QMD - Query Markdown Documents");
     expect(stdout).toContain(`✓ Installed QMD skill to ${skillDir}`);
     expect(stdout).toContain(`✓ Linked Claude skill at ${claudeLink}`);
   });
@@ -408,7 +410,7 @@ describe("CLI Skill Commands", () => {
 
     const skillDir = join(fakeHome, ".agents", "skills", "qmd");
     expect(lstatSync(skillDir).isSymbolicLink()).toBe(false);
-    expect(readFileSync(join(skillDir, "SKILL.md"), "utf-8")).toContain("# QMD - Quick Markdown Search");
+    expect(readFileSync(join(skillDir, "SKILL.md"), "utf-8")).toContain("# QMD - Query Markdown Documents");
     expect(stdout).toContain(`✓ Claude already sees the skill via ${join(fakeHome, ".claude", "skills")}`);
   });
 
@@ -1580,7 +1582,8 @@ describe("mcp http daemon", () => {
     port: number,
     options: { args?: string[]; env?: Record<string, string> } = {},
   ): import("child_process").ChildProcess {
-    const proc = spawn(tsxBin, [qmdScript, ...(options.args ?? []), "mcp", "--http", "--port", String(port)], {
+    const runner = qmdRunnerArgs([...(options.args ?? []), "mcp", "--http", "--port", String(port)]);
+    const proc = spawn(runner.command, runner.args, {
       cwd: fixturesDir,
       env: {
         ...process.env,

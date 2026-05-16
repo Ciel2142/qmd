@@ -186,7 +186,7 @@ function seedTestData(db: Database): void {
   for (let i = 0; i < 768; i++) embedding[i] = Math.random();
 
   for (const doc of docs.slice(0, 4)) { // Skip large file for embeddings
-    db.prepare(`INSERT INTO content_vectors (hash, seq, pos, model, embedded_at) VALUES (?, 0, 0, 'embeddinggemma', ?)`).run(doc.hash, now);
+    db.prepare(`INSERT INTO content_vectors (hash, seq, pos, model, embedded_at) VALUES (?, 0, 0, ?, ?)`).run(doc.hash, DEFAULT_EMBED_MODEL, now);
     db.prepare(`INSERT INTO vectors_vec (hash_seq, embedding) VALUES (?, ?)`).run(`${doc.hash}_0`, embedding);
   }
 }
