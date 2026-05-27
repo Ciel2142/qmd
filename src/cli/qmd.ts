@@ -5,7 +5,7 @@ import { execSync, spawn as nodeSpawn } from "child_process";
 import { fileURLToPath } from "url";
 import { basename, dirname, join as pathJoin, relative as relativePath, resolve as pathResolve } from "path";
 import { parseArgs } from "util";
-import { readFileSync, readdirSync, realpathSync, statSync, existsSync, unlinkSync, writeFileSync, openSync, closeSync, mkdirSync, lstatSync, rmSync, symlinkSync, readlinkSync, copyFileSync } from "fs";
+import { readFileSync, readdirSync, realpathSync, statSync, existsSync, unlinkSync, writeFileSync, openSync, closeSync, mkdirSync, lstatSync, rmSync, symlinkSync, readlinkSync, copyFileSync, appendFileSync } from "fs";
 import { createInterface } from "readline/promises";
 import {
   getPwd,
@@ -111,7 +111,8 @@ import {
   type CollectionConfig,
   type ModelsConfig,
 } from "../collections.js";
-import { runCheckOnce, writeStatusFile, daemonPaths, type DaemonStatus } from "../daemon.js";
+import { runCheckOnce, writeStatusFile, daemonPaths, applyAction, type DaemonStatus } from "../daemon.js";
+import { detectCollectionStaleness } from "../detect.js";
 import { getQmdCacheDir } from "../paths.js";
 
 // NOTE: enableProductionMode() is intentionally NOT called at module scope here.
@@ -3891,6 +3892,66 @@ function printCheckTable(status: DaemonStatus): void {
   }
 }
 
+async function runWatchForeground(
+  intervalSeconds: number,
+  statusPath: string,
+  logPath: string,
+): Promise<void> {
+  let running = true;
+  const stop = () => {
+    running = false;
+  };
+  process.on("SIGTERM", stop);
+  process.on("SIGINT", stop);
+
+  while (running) {
+    try {
+      const config = loadConfig();
+      const store = getStore();
+      const status = await runCheckOnce(store, config, intervalSeconds);
+
+      for (const [name, entry] of Object.entries(status.collections)) {
+        if (entry.action !== "notify" && entry.stale && !entry.error) {
+          const col = { name, ...config.collections[name]! };
+          try {
+            await applyAction(store, col, entry, entry.action, config);
+            // Re-detect so the persisted status reflects the POST-action state:
+            // `update` may leave needEmbed>0 (still stale); `update+embed` clears it.
+            const fresh = await detectCollectionStaleness(
+              store,
+              col,
+              resolveModels(config.models).embed,
+            );
+            Object.assign(entry, fresh);
+          } catch (e) {
+            entry.error = e instanceof Error ? e.message : String(e);
+          }
+        }
+      }
+
+      writeStatusFile(statusPath, status);
+      const stale = Object.values(status.collections)
+        .filter((e) => e.stale)
+        .map((e) => e.collection);
+      appendFileSync(
+        logPath,
+        `${status.checked_at} checked ${Object.keys(status.collections).length} collection(s); stale: ${stale.join(", ") || "none"}\n`,
+      );
+    } catch (e) {
+      appendFileSync(
+        logPath,
+        `${new Date().toISOString()} tick error: ${e instanceof Error ? e.message : String(e)}\n`,
+      );
+    }
+
+    // Interruptible sleep (outside the try so it always runs).
+    const until = Date.now() + intervalSeconds * 1000;
+    while (running && Date.now() < until) {
+      await new Promise((r) => setTimeout(r, Math.min(250, until - Date.now())));
+    }
+  }
+}
+
 function printDoctorHint(): void {
   console.error("If qmd still behaves unexpectedly, run 'qmd doctor' for diagnostics.");
 }
@@ -4353,6 +4414,72 @@ if (isMain) {
       break;
     }
 
+    case "watch": {
+      const sub = cli.args[0]; // stop | undefined
+      const cacheDir = getQmdCacheDir();
+      const { pidPath, logPath, statusPath } = daemonPaths(cacheDir);
+
+      if (sub === "stop") {
+        if (!existsSync(pidPath)) {
+          console.log("Not running (no PID file).");
+          process.exit(0);
+        }
+        const pid = parseInt(readFileSync(pidPath, "utf-8").trim());
+        try {
+          process.kill(pid, 0);
+          process.kill(pid, "SIGTERM");
+          unlinkSync(pidPath);
+          console.log(`Stopped QMD watch daemon (PID ${pid}).`);
+        } catch {
+          unlinkSync(pidPath);
+          console.log("Cleaned up stale PID file (daemon was not running).");
+        }
+        process.exit(0);
+      }
+
+      const config = loadConfig();
+      const intervalSeconds = Number(cli.values.interval) || config.daemon?.interval || 300;
+
+      if (cli.values.daemon) {
+        if (existsSync(pidPath)) {
+          const existingPid = parseInt(readFileSync(pidPath, "utf-8").trim());
+          try {
+            process.kill(existingPid, 0);
+            console.error(`Already running (PID ${existingPid}). Run 'qmd watch stop' first.`);
+            process.exit(1);
+          } catch {
+            // stale pidfile — continue
+          }
+        }
+        mkdirSync(cacheDir, { recursive: true });
+        const logFd = openSync(logPath, "w");
+        const selfPath = fileURLToPath(import.meta.url);
+        const indexArgs = cli.values.index ? ["--index", String(cli.values.index)] : [];
+        const spawnArgs = selfPath.endsWith(".ts")
+          ? ["--import", pathJoin(dirname(selfPath), "..", "..", "node_modules", "tsx", "dist", "esm", "index.mjs"), selfPath, ...indexArgs, "watch", "--interval", String(intervalSeconds)]
+          : [selfPath, ...indexArgs, "watch", "--interval", String(intervalSeconds)];
+        const child = nodeSpawn(process.execPath, spawnArgs, {
+          stdio: ["ignore", logFd, logFd],
+          detached: true,
+        });
+        child.unref();
+        closeSync(logFd);
+        writeFileSync(pidPath, String(child.pid));
+        console.log(`Started QMD watch daemon (PID ${child.pid}, interval ${intervalSeconds}s)`);
+        console.log(`Status: ${statusPath}`);
+        console.log(`Logs: ${logPath}`);
+        process.exit(0);
+      }
+
+      // Foreground
+      process.removeAllListeners("SIGTERM");
+      process.removeAllListeners("SIGINT");
+      mkdirSync(cacheDir, { recursive: true });
+      console.log(`Watching ${Object.keys(config.collections).length} collection(s) every ${intervalSeconds}s. Ctrl-C to stop.`);
+      await runWatchForeground(intervalSeconds, statusPath, logPath);
+      break;
+    }
+
     case "mcp": {
       const sub = cli.args[0]; // stop | status | undefined
 
@@ -4535,7 +4662,7 @@ if (isMain) {
       process.exit(1);
   }
 
-  if (cli.command !== "mcp") {
+  if (cli.command !== "mcp" && cli.command !== "watch") {
     await finishSuccessfulCliCommand({
       command: cli.command,
       format: cli.opts.format,

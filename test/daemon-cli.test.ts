@@ -1,6 +1,6 @@
 import { describe, test, expect, beforeEach, afterEach } from "vitest";
 import { mkdtemp, rm, writeFile, mkdir } from "fs/promises";
-import { readFileSync } from "fs";
+import { readFileSync, existsSync } from "fs";
 import { tmpdir } from "os";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
@@ -73,5 +73,54 @@ describe("qmd check", () => {
     expect(res.status).toBe(1); // a.md present but unindexed => stale
     expect(res.stdout).toContain("col");
     expect(res.stdout).toContain("STALE");
+  });
+});
+
+describe("qmd watch lifecycle", () => {
+  let root: string;
+  let configDir: string;
+  let cacheDir: string;
+  let colDir: string;
+  let env: Record<string, string>;
+
+  beforeEach(async () => {
+    root = await mkdtemp(join(tmpdir(), "qmd-watch-cli-"));
+    configDir = join(root, "config");
+    cacheDir = join(root, "cache");
+    colDir = join(root, "col");
+    await mkdir(configDir, { recursive: true });
+    await mkdir(cacheDir, { recursive: true });
+    await mkdir(colDir, { recursive: true });
+    await writeFile(join(colDir, "a.md"), "# A\n\nalpha");
+    await writeFile(
+      join(configDir, "index.yml"),
+      `models:\n  embed: test-model\ncollections:\n  col:\n    path: ${colDir}\n    pattern: '**/*.md'\ndaemon:\n  interval: 1\n`,
+    );
+    env = { QMD_CONFIG_DIR: configDir, XDG_CACHE_HOME: cacheDir };
+  });
+  afterEach(async () => {
+    runCli(["watch", "stop"], env); // best-effort cleanup
+    await new Promise((r) => setTimeout(r, 500)); // let the child exit before rm
+    await rm(root, { recursive: true, force: true });
+  });
+
+  test("--daemon writes a pidfile, then stop removes it and writes a status file", async () => {
+    const start = runCli(["watch", "--daemon", "--interval", "1"], env);
+    expect(start.status).toBe(0);
+    const pidPath = join(cacheDir, "qmd", "watch.pid");
+    expect(existsSync(pidPath)).toBe(true);
+
+    const statusPath = join(cacheDir, "qmd", "daemon-status.json");
+    const deadline = Date.now() + 10000;
+    while (!existsSync(statusPath) && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 200));
+    }
+    expect(existsSync(statusPath)).toBe(true);
+    const status = JSON.parse(readFileSync(statusPath, "utf-8"));
+    expect(status.collections.col).toBeDefined();
+
+    const stop = runCli(["watch", "stop"], env);
+    expect(stop.status).toBe(0);
+    expect(existsSync(pidPath)).toBe(false);
   });
 });
