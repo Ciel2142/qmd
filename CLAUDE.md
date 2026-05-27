@@ -19,6 +19,10 @@ qmd multi-get <pattern>           # Get multiple docs by glob or comma-separated
 qmd status                        # Show index status and collections
 qmd update [--pull]               # Re-index all collections (--pull: git pull first)
 qmd embed                         # Generate vector embeddings (uses node-llama-cpp)
+qmd check                         # Report which collections need update/embed (exit 1 if any stale)
+qmd watch [--interval N]          # Watch collections on an interval (foreground)
+qmd watch --daemon [--interval N] # Watch in the background
+qmd watch stop                    # Stop the background watch daemon
 qmd query <query>                 # Search with query expansion + reranking (recommended)
 qmd search <query>                # Full-text keyword search (BM25, no LLM)
 qmd vsearch <query>               # Vector similarity search (no reranking)
@@ -146,6 +150,16 @@ bun test --preload ./src/test-preload.ts test/
 - Never modify the SQLite database directly
 - Write out example commands for the user to run manually
 - Index is stored at `~/.cache/qmd/index.sqlite`
+
+## Watch daemon & chunk strategy config
+
+- `chunk_strategy: auto|regex` in `~/.config/qmd/index.yml` sets the default embed
+  chunk strategy (global), overridable per-collection via `chunk_strategy:` and by
+  the `--chunk-strategy` flag. Precedence: flag > per-collection > global > regex.
+- `daemon: { interval: <seconds>, default_action: notify|update|update+embed }`
+  configures the watch daemon. `action:` per-collection overrides the default.
+- The daemon writes `~/.cache/qmd/daemon-status.json` and `daemon.log`. `notify`
+  (default) never mutates the index; `update`/`update+embed` are opt-in.
 
 ## Do NOT compile
 

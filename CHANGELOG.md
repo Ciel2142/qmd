@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Added
+- `qmd check` reports per-collection staleness (files to index, hashes to embed) and exits non-zero when stale.
+- `qmd watch` / `qmd watch --daemon` / `qmd watch stop`: a daemon that polls collections on an interval and notifies (default) or auto-runs update/embed per the configured action.
+- `chunk_strategy` config key (global + per-collection) sets the default embed chunk strategy, reused by `qmd embed` and the daemon.
+
 ## [2.5.2] - 2026-05-22
 
 ### Fixes
