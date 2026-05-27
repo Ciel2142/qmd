@@ -111,6 +111,8 @@ import {
   type CollectionConfig,
   type ModelsConfig,
 } from "../collections.js";
+import { runCheckOnce, writeStatusFile, daemonPaths, type DaemonStatus } from "../daemon.js";
+import { getQmdCacheDir } from "../paths.js";
 
 // NOTE: enableProductionMode() is intentionally NOT called at module scope here.
 // Importing this module for its exports (e.g. buildEditorUri, termLink from
@@ -2739,6 +2741,8 @@ function parseCLI() {
       http: { type: "boolean" },
       daemon: { type: "boolean" },
       port: { type: "string" },
+      // Daemon options
+      interval: { type: "string" },  // seconds between watch checks
     },
     allowPositionals: true,
     strict: false, // Allow unknown options to pass through
@@ -3863,6 +3867,30 @@ async function showDoctor(): Promise<void> {
   closeDb();
 }
 
+function printCheckTable(status: DaemonStatus): void {
+  const names = Object.keys(status.collections);
+  if (names.length === 0) {
+    console.log("No collections configured.");
+    return;
+  }
+  console.log(`Checked at ${status.checked_at}`);
+  for (const name of names) {
+    const e = status.collections[name]!;
+    if (e.error) {
+      console.log(`  ${name}: error — ${e.error}`);
+      continue;
+    }
+    const flag = e.stale ? "STALE" : "ok";
+    console.log(
+      `  ${name}: ${flag} (new ${e.filesNew}, changed ${e.filesChanged}, removed ${e.filesRemoved}, need-embed ${e.needEmbed}) [${e.action}]`,
+    );
+    if (e.stale) {
+      if (e.filesNew + e.filesChanged + e.filesRemoved > 0) console.log(`      → run: qmd update`);
+      if (e.needEmbed > 0) console.log(`      → run: qmd embed`);
+    }
+  }
+}
+
 function printDoctorHint(): void {
   console.error("If qmd still behaves unexpectedly, run 'qmd doctor' for diagnostics.");
 }
@@ -4203,6 +4231,23 @@ if (isMain) {
     case "status":
       await showStatus();
       break;
+
+    case "check": {
+      const config = loadConfig();
+      const store = getStore();
+      const interval = Number(cli.values.interval) || config.daemon?.interval || 300;
+      const status = await runCheckOnce(store, config, interval);
+      const cacheDir = getQmdCacheDir();
+      mkdirSync(cacheDir, { recursive: true });
+      writeStatusFile(daemonPaths(cacheDir).statusPath, status);
+      if (cli.values.json) console.log(JSON.stringify(status, null, 2));
+      else printCheckTable(status);
+      const anyStale = Object.values(status.collections).some((e) => e.stale);
+      // check is read-only detection (no LlamaCpp loaded), so exit directly
+      // without finishSuccessfulCliCommand's model disposal.
+      closeDb();
+      process.exit(anyStale ? 1 : 0);
+    }
 
     case "doctor":
       await showDoctor();

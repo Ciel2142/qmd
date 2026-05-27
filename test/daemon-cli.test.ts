@@ -1,0 +1,77 @@
+import { describe, test, expect, beforeEach, afterEach } from "vitest";
+import { mkdtemp, rm, writeFile, mkdir } from "fs/promises";
+import { readFileSync } from "fs";
+import { tmpdir } from "os";
+import { join, dirname } from "path";
+import { fileURLToPath } from "url";
+import { spawnSync } from "child_process";
+
+const thisDir = dirname(fileURLToPath(import.meta.url));
+const projectRoot = join(thisDir, "..");
+const CLI = join(projectRoot, "src", "cli", "qmd.ts");
+const isBunRuntime = typeof (globalThis as { Bun?: unknown }).Bun !== "undefined";
+const tsxCli = join(projectRoot, "node_modules", "tsx", "dist", "cli.mjs");
+const cliArgs = isBunRuntime ? [CLI] : [tsxCli, CLI];
+
+function runCli(args: string[], env: Record<string, string>) {
+  return spawnSync(process.execPath, [...cliArgs, ...args], {
+    env: { ...process.env, ...env },
+    encoding: "utf-8",
+  });
+}
+
+describe("qmd check", () => {
+  let root: string;
+  let configDir: string;
+  let cacheDir: string;
+  let colDir: string;
+  let env: Record<string, string>;
+
+  beforeEach(async () => {
+    root = await mkdtemp(join(tmpdir(), "qmd-check-cli-"));
+    configDir = join(root, "config");
+    cacheDir = join(root, "cache");
+    colDir = join(root, "col");
+    await mkdir(configDir, { recursive: true });
+    await mkdir(cacheDir, { recursive: true });
+    await mkdir(colDir, { recursive: true });
+    await writeFile(join(colDir, "a.md"), "# A\n\nalpha");
+    await writeFile(
+      join(configDir, "index.yml"),
+      `models:\n  embed: test-model\ncollections:\n  col:\n    path: ${colDir}\n    pattern: '**/*.md'\n`,
+    );
+    env = { QMD_CONFIG_DIR: configDir, XDG_CACHE_HOME: cacheDir };
+  });
+
+  afterEach(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+
+  test("exits non-zero and writes status file when a collection is stale", () => {
+    const res = runCli(["check", "--json"], env);
+    expect(res.status).toBe(1); // not yet indexed/embedded => stale
+    const status = JSON.parse(res.stdout);
+    expect(status.collections.col.filesNew).toBe(1);
+    // status file written under <cacheDir>/qmd/daemon-status.json
+    const statusPath = join(cacheDir, "qmd", "daemon-status.json");
+    const onDisk = JSON.parse(readFileSync(statusPath, "utf-8"));
+    expect(onDisk.collections.col.filesNew).toBe(1);
+  });
+
+  test("exits zero when no collection is stale", async () => {
+    // Remove the fixture file so the collection has nothing new/changed/removed
+    // and nothing to embed -> fresh -> exit 0.
+    await rm(join(colDir, "a.md"));
+    const res = runCli(["check", "--json"], env);
+    expect(res.status).toBe(0);
+    const status = JSON.parse(res.stdout);
+    expect(status.collections.col.stale).toBe(false);
+  });
+
+  test("table output lists the collection and its stale flag", () => {
+    const res = runCli(["check"], env); // no --json => printCheckTable
+    expect(res.status).toBe(1); // a.md present but unindexed => stale
+    expect(res.stdout).toContain("col");
+    expect(res.stdout).toContain("STALE");
+  });
+});
