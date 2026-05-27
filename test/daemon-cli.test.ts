@@ -76,6 +76,57 @@ describe("qmd check", () => {
   });
 });
 
+describe("qmd check -c collection filter", () => {
+  let root: string;
+  let configDir: string;
+  let cacheDir: string;
+  let env: Record<string, string>;
+
+  beforeEach(async () => {
+    root = await mkdtemp(join(tmpdir(), "qmd-check-filter-cli-"));
+    configDir = join(root, "config");
+    cacheDir = join(root, "cache");
+    const staleDir = join(root, "stalecol");
+    const freshDir = join(root, "freshcol");
+    await mkdir(configDir, { recursive: true });
+    await mkdir(cacheDir, { recursive: true });
+    await mkdir(staleDir, { recursive: true });
+    await mkdir(freshDir, { recursive: true }); // empty dir => nothing new/changed/removed => fresh
+    await writeFile(join(staleDir, "a.md"), "# A\n\nalpha");
+    await writeFile(
+      join(configDir, "index.yml"),
+      `models:\n  embed: test-model\ncollections:\n  stalecol:\n    path: ${staleDir}\n    pattern: '**/*.md'\n  freshcol:\n    path: ${freshDir}\n    pattern: '**/*.md'\n`,
+    );
+    env = { QMD_CONFIG_DIR: configDir, XDG_CACHE_HOME: cacheDir };
+  });
+  afterEach(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+
+  test("checking only a fresh collection exits 0 even though another collection is stale", () => {
+    // Without -c, the stale collection forces exit 1.
+    expect(runCli(["check"], env).status).toBe(1);
+    // -c freshcol scopes detection to freshcol only => exit 0 (no cron false-positive).
+    const res = runCli(["check", "-c", "freshcol", "--json"], env);
+    expect(res.status).toBe(0);
+    const status = JSON.parse(res.stdout);
+    expect(Object.keys(status.collections)).toEqual(["freshcol"]);
+  });
+
+  test("checking only the stale collection still exits 1 and reports just that one", () => {
+    const res = runCli(["check", "-c", "stalecol", "--json"], env);
+    expect(res.status).toBe(1);
+    const status = JSON.parse(res.stdout);
+    expect(Object.keys(status.collections)).toEqual(["stalecol"]);
+  });
+
+  test("an unknown -c name errors instead of silently checking everything", () => {
+    const res = runCli(["check", "-c", "nope"], env);
+    expect(res.status).toBe(1);
+    expect(res.stderr).toContain("Collection not found: nope");
+  });
+});
+
 describe("qmd watch lifecycle", () => {
   let root: string;
   let configDir: string;

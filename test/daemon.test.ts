@@ -60,6 +60,27 @@ describe("daemon core", () => {
     expect(typeof status.checked_at).toBe("string");
   });
 
+  test("runCheckOnce restricts to the requested collections when a filter is given", async () => {
+    await writeFile(join(colDir, "a.md"), "# A\n\nalpha");
+    await reindexCollection(store, colDir, "**/*.md", "col");
+    const colDir2 = join(root, "col2");
+    await mkdir(colDir2, { recursive: true });
+    await writeFile(join(colDir2, "b.md"), "# B\n\nbeta");
+    await reindexCollection(store, colDir2, "**/*.md", "col2");
+    const config: CollectionConfig = {
+      models: { embed: "test-model" },
+      collections: {
+        col: { path: colDir, pattern: "**/*.md" },
+        col2: { path: colDir2, pattern: "**/*.md" },
+      },
+    };
+    setConfigSource({ config });
+    const all = await runCheckOnce(store, config, 300);
+    expect(Object.keys(all.collections).sort()).toEqual(["col", "col2"]);
+    const filtered = await runCheckOnce(store, config, 300, ["col2"]);
+    expect(Object.keys(filtered.collections)).toEqual(["col2"]);
+  });
+
   test("status file round-trips atomically", async () => {
     const { statusPath } = daemonPaths(root);
     const status = await runCheckOnce(store, { collections: {} }, 60);

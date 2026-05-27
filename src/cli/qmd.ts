@@ -4317,9 +4317,12 @@ if (isMain) {
 
     case "check": {
       const config = loadConfig();
+      // Validate -c names (exits "Collection not found: X" on typo) and scope the
+      // check to them; empty (no -c) means check all configured collections.
+      const requested = resolveCollectionFilter(cli.opts.collection, false);
       const store = getStore();
       const interval = Number(cli.values.interval) || config.daemon?.interval || 300;
-      const status = await runCheckOnce(store, config, interval);
+      const status = await runCheckOnce(store, config, interval, requested);
       const cacheDir = getQmdCacheDir();
       mkdirSync(cacheDir, { recursive: true });
       writeStatusFile(daemonPaths(cacheDir).statusPath, status);

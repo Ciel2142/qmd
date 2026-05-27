@@ -55,6 +55,7 @@ export async function runCheckOnce(
   store: Store,
   config: CollectionConfig,
   intervalSeconds: number,
+  collectionNames?: string[],
 ): Promise<DaemonStatus> {
   const embedModel = resolveModels(config.models).embed;
   const status: DaemonStatus = {
@@ -62,7 +63,12 @@ export async function runCheckOnce(
     interval: intervalSeconds,
     collections: {},
   };
-  for (const col of namedCollections(config)) {
+  const all = namedCollections(config);
+  const selected =
+    collectionNames && collectionNames.length > 0
+      ? all.filter((c) => collectionNames.includes(c.name))
+      : all;
+  for (const col of selected) {
     const action = effectiveAction(col, config);
     try {
       const s = await detectCollectionStaleness(store, col, embedModel);
