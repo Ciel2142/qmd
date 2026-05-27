@@ -107,6 +107,7 @@ import {
   getLocalDbPath,
   getConfigPath,
   configExists,
+  resolveEmbedChunkStrategy,
   type CollectionConfig,
   type ModelsConfig,
 } from "../collections.js";
@@ -4215,13 +4216,16 @@ if (isMain) {
       try {
         const maxDocsPerBatch = parseEmbedBatchOption("maxDocsPerBatch", cli.values["max-docs-per-batch"]);
         const maxBatchMb = parseEmbedBatchOption("maxBatchBytes", cli.values["max-batch-mb"]);
-        const embedChunkStrategy = parseChunkStrategy(cli.values["chunk-strategy"]);
         // Validate -c against configured collections before dispatching, so a
         // typo errors with "Collection not found: X" instead of silently
         // reporting success because no pending docs match a nonexistent name.
         // embed operates on a single collection; only the first value is used.
         const embedValidatedCollections = resolveCollectionFilter(cli.opts.collection, false);
         const embedCollection = embedValidatedCollections[0];
+        const embedChunkStrategy = resolveEmbedChunkStrategy(
+          parseChunkStrategy(cli.values["chunk-strategy"]),
+          embedCollection,
+        );
         await vectorIndex(resolveEmbedModelForCli(), !!cli.values.force, {
           maxDocsPerBatch,
           maxBatchBytes: maxBatchMb === undefined ? undefined : maxBatchMb * 1024 * 1024,
