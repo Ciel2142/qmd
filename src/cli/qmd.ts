@@ -111,7 +111,7 @@ import {
   type CollectionConfig,
   type ModelsConfig,
 } from "../collections.js";
-import { runCheckOnce, writeStatusFile, daemonPaths, applyAction, type DaemonStatus } from "../daemon.js";
+import { runCheckOnce, writeStatusFile, daemonPaths, applyAction, readStatusFile, type DaemonStatus } from "../daemon.js";
 import { detectCollectionStaleness } from "../detect.js";
 import { getQmdCacheDir } from "../paths.js";
 
@@ -664,6 +664,27 @@ async function showStatus(): Promise<void> {
   }
 
   closeDb();
+}
+
+function printDaemonStatusIfPresent(): void {
+  const status = readStatusFile(daemonPaths(getQmdCacheDir()).statusPath);
+  if (!status) return;
+  const entries = Object.values(status.collections);
+  const errored = entries.filter((e) => e.error);
+  const stale = entries.filter((e) => e.stale && !e.error);
+  console.log(`\nLast check: ${status.checked_at}`);
+  if (errored.length === 0 && stale.length === 0) {
+    console.log("  All watched collections are fresh.");
+    return;
+  }
+  for (const e of errored) {
+    console.log(`  ${e.collection}: check error — ${e.error}`);
+  }
+  for (const e of stale) {
+    console.log(
+      `  ${e.collection}: STALE (new ${e.filesNew}, changed ${e.filesChanged}, removed ${e.filesRemoved}, need-embed ${e.needEmbed})`,
+    );
+  }
 }
 
 async function updateCollections(): Promise<void> {
@@ -4291,6 +4312,7 @@ if (isMain) {
 
     case "status":
       await showStatus();
+      printDaemonStatusIfPresent();
       break;
 
     case "check": {

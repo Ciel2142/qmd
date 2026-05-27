@@ -124,3 +124,42 @@ describe("qmd watch lifecycle", () => {
     expect(existsSync(pidPath)).toBe(false);
   });
 });
+
+describe("qmd status surfaces daemon status", () => {
+  let root: string;
+  let configDir: string;
+  let cacheDir: string;
+  let colDir: string;
+  let env: Record<string, string>;
+
+  beforeEach(async () => {
+    root = await mkdtemp(join(tmpdir(), "qmd-status-cli-"));
+    configDir = join(root, "config");
+    cacheDir = join(root, "cache");
+    colDir = join(root, "col");
+    await mkdir(configDir, { recursive: true });
+    await mkdir(cacheDir, { recursive: true });
+    await mkdir(colDir, { recursive: true });
+    await writeFile(join(colDir, "a.md"), "# A\n\nalpha");
+    await writeFile(
+      join(configDir, "index.yml"),
+      `models:\n  embed: test-model\ncollections:\n  col:\n    path: ${colDir}\n    pattern: '**/*.md'\n`,
+    );
+    env = { QMD_CONFIG_DIR: configDir, XDG_CACHE_HOME: cacheDir };
+  });
+  afterEach(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+
+  test("status output includes the last check result after a check", () => {
+    runCli(["check"], env); // writes daemon-status.json
+    const res = runCli(["status"], env);
+    expect(res.status).toBe(0);
+    // existing showStatus() output is preserved (additive)
+    expect(res.stdout).toContain("QMD Status"); // showStatus() unconditionally prints this header
+    // daemon section surfaced
+    expect(res.stdout).toMatch(/[Ll]ast check/);
+    expect(res.stdout).toContain("col");
+    expect(res.stdout).toContain("STALE"); // a.md present but unindexed => stale
+  });
+});
