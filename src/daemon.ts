@@ -4,11 +4,18 @@
  */
 import { writeFileSync, readFileSync, renameSync, existsSync, mkdirSync } from "node:fs";
 import { join, dirname } from "node:path";
-import { type Store } from "./store.js";
+import { spawnSync } from "node:child_process";
+import {
+  type Store,
+  reindexCollection,
+  generateEmbeddings,
+  getHashesNeedingEmbedding,
+} from "./store.js";
 import {
   type CollectionConfig,
   type NamedCollection,
   type DaemonAction,
+  resolveChunkStrategy,
 } from "./collections.js";
 import { resolveModels } from "./llm.js";
 import { detectCollectionStaleness, type CollectionStaleness } from "./detect.js";
@@ -89,5 +96,54 @@ export function readStatusFile(path: string): DaemonStatus | null {
     return JSON.parse(readFileSync(path, "utf-8")) as DaemonStatus;
   } catch {
     return null;
+  }
+}
+
+/**
+ * Apply a daemon action for one collection. notify is a no-op. update runs the
+ * optional `update:` shell command then reindexes. update+embed additionally
+ * embeds remaining pending hashes for the collection using the resolved
+ * (per-collection) chunk strategy.
+ */
+export async function applyAction(
+  store: Store,
+  col: NamedCollection,
+  staleness: CollectionStaleness,
+  action: DaemonAction,
+  config: CollectionConfig,
+): Promise<void> {
+  if (action === "notify" || !staleness.stale) return;
+
+  if (col.update) {
+    const result = spawnSync("bash", ["-c", col.update], {
+      cwd: col.path,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    if (result.error) throw result.error;
+    if (result.status !== 0) {
+      const stderr = result.stderr?.toString().trim();
+      throw new Error(
+        `update command failed (exit ${result.status ?? "signal"})${stderr ? `: ${stderr}` : ""}`,
+      );
+    }
+  }
+
+  const hasFileDeltas =
+    staleness.filesNew + staleness.filesChanged + staleness.filesRemoved > 0;
+  if (hasFileDeltas || col.update) {
+    await reindexCollection(store, col.path, col.pattern || "**/*.md", col.name, {
+      ignorePatterns: col.ignore,
+    });
+  }
+
+  if (action === "update+embed") {
+    const model = resolveModels(config.models).embed;
+    if (getHashesNeedingEmbedding(store.db, col.name, model) > 0) {
+      await generateEmbeddings(store, {
+        collection: col.name,
+        model,
+        chunkStrategy: resolveChunkStrategy(undefined, col, config),
+      });
+    }
   }
 }
