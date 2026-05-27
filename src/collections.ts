@@ -9,10 +9,20 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { join, dirname, resolve } from "path";
 import { qmdHomedir } from "./paths.js";
 import YAML from "yaml";
+import type { ChunkStrategy } from "./store.js";
 
 // ============================================================================
 // Types
 // ============================================================================
+
+export type { ChunkStrategy };
+
+export type DaemonAction = "notify" | "update" | "update+embed";
+
+export interface DaemonConfig {
+  interval?: number;          // seconds between checks (default 300)
+  default_action?: DaemonAction; // default "notify"
+}
 
 /**
  * Context definitions for a collection
@@ -31,6 +41,8 @@ export interface Collection {
   context?: ContextMap;      // Optional context definitions
   update?: string;           // Optional bash command to run during qmd update
   includeByDefault?: boolean; // Include in queries by default (default: true)
+  chunk_strategy?: ChunkStrategy;  // per-collection embed chunk strategy
+  action?: DaemonAction;           // per-collection daemon action
 }
 
 /**
@@ -51,6 +63,8 @@ export interface CollectionConfig {
   editor_uri_template?: string;               // Alias for editor_uri
   collections: Record<string, Collection>;    // Collection name -> config
   models?: ModelsConfig;
+  chunk_strategy?: ChunkStrategy;             // global default embed chunk strategy
+  daemon?: DaemonConfig;
 }
 
 /**
@@ -536,4 +550,33 @@ export function configExists(): boolean {
 export function isValidCollectionName(name: string): boolean {
   // Allow alphanumeric, hyphens, underscores
   return /^[a-zA-Z0-9_-]+$/.test(name);
+}
+
+/**
+ * Resolve the embed chunk strategy by precedence:
+ * CLI flag > per-collection override > global default > built-in "regex".
+ * Per-collection only meaningfully applies when embedding is collection-scoped.
+ */
+export function resolveChunkStrategy(
+  cliFlag: ChunkStrategy | undefined,
+  collection: Collection | undefined,
+  config: CollectionConfig,
+): ChunkStrategy {
+  if (cliFlag) return cliFlag;
+  if (collection?.chunk_strategy) return collection.chunk_strategy;
+  if (config.chunk_strategy) return config.chunk_strategy;
+  return "regex";
+}
+
+/**
+ * Disk-backed convenience wrapper: loads the active config and resolves the
+ * chunk strategy for an optional named collection.
+ */
+export function resolveEmbedChunkStrategy(
+  cliFlag: ChunkStrategy | undefined,
+  collectionName: string | undefined,
+): ChunkStrategy {
+  const config = loadConfig();
+  const collection = collectionName ? config.collections[collectionName] : undefined;
+  return resolveChunkStrategy(cliFlag, collection, config);
 }
