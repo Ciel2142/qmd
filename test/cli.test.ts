@@ -11,7 +11,7 @@ import { existsSync, lstatSync, readFileSync, symlinkSync, writeFileSync, unlink
 import { tmpdir } from "os";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
-import { spawn } from "child_process";
+import { spawn, spawnSync } from "child_process";
 import { setTimeout as sleep } from "timers/promises";
 import { buildEditorUri, termLink, resolveEmbedModelForCli } from "../src/cli/qmd.ts";
 import { openDatabase } from "../src/db.ts";
@@ -2076,6 +2076,24 @@ describe("mcp http daemon", () => {
     process.kill(pid, "SIGTERM");
     await sleep(500);
     try { unlinkSync(pidPath()); } catch {}
+  });
+
+  test("unknown subcommand errors instead of silently starting the stdio server", async () => {
+    const runner = qmdRunnerArgs(["mcp", "status"]);
+    const res = spawnSync(runner.command, runner.args, {
+      env: {
+        ...process.env,
+        INDEX_PATH: daemonDbPath,
+        QMD_CONFIG_DIR: daemonConfigDir,
+        XDG_CACHE_HOME: daemonCacheDir,
+      },
+      encoding: "utf-8",
+      timeout: 5000,
+    });
+    expect(res.status).toBe(1);
+    expect(res.stderr).toContain("Unknown subcommand: status");
+    // Did not leave a PID file from a spawned daemon.
+    expect(existsSync(pidPath())).toBe(false);
   });
 });
 

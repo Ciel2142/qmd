@@ -8,6 +8,10 @@
 - `qmd watch` / `qmd watch --daemon` / `qmd watch stop`: a daemon that polls collections on an interval and notifies (default) or auto-runs update/embed per the configured action.
 - `chunk_strategy` config key (global + per-collection) sets the default embed chunk strategy, reused by `qmd embed` and the daemon.
 
+### Fixes
+
+- `qmd watch` and `qmd mcp` now reject unknown positional subcommands instead of silently falling through to the foreground watcher / stdio MCP server. `qmd watch status`, `qmd mcp foo`, etc. now exit 1 with a usage hint rather than hanging non-interactive scripts.
+
 ## [2.5.2] - 2026-05-22
 
 ### Fixes

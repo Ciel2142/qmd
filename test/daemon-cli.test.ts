@@ -174,6 +174,20 @@ describe("qmd watch lifecycle", () => {
     expect(stop.status).toBe(0);
     expect(existsSync(pidPath)).toBe(false);
   });
+
+  test("an unknown subcommand errors instead of silently starting the watcher", () => {
+    const res = spawnSync(process.execPath, [...cliArgs, "watch", "status"], {
+      env: { ...process.env, ...env },
+      encoding: "utf-8",
+      timeout: 5000,
+    });
+    expect(res.status).toBe(1);
+    expect(res.stderr).toContain("Unknown subcommand: status");
+    // Did not fall through into the foreground watcher banner.
+    expect(res.stdout).not.toContain("Watching");
+    const pidPath = join(cacheDir, "qmd", "watch.pid");
+    expect(existsSync(pidPath)).toBe(false);
+  });
 });
 
 describe("qmd status surfaces daemon status", () => {

@@ -4441,6 +4441,12 @@ if (isMain) {
 
     case "watch": {
       const sub = cli.args[0]; // stop | undefined
+      if (sub !== undefined && sub !== "stop") {
+        console.error(`Unknown subcommand: ${sub}`);
+        console.error("Usage: qmd watch [--daemon] [--interval N]");
+        console.error("       qmd watch stop");
+        process.exit(1);
+      }
       const cacheDir = getQmdCacheDir();
       const { pidPath, logPath, statusPath } = daemonPaths(cacheDir);
 
@@ -4506,7 +4512,13 @@ if (isMain) {
     }
 
     case "mcp": {
-      const sub = cli.args[0]; // stop | status | undefined
+      const sub = cli.args[0]; // stop | undefined
+      if (sub !== undefined && sub !== "stop") {
+        console.error(`Unknown subcommand: ${sub}`);
+        console.error("Usage: qmd mcp [--http] [--port N] [--daemon]");
+        console.error("       qmd mcp stop");
+        process.exit(1);
+      }
 
       // Cache dir for PID/log files — same dir as the index
       const cacheDir = process.env.XDG_CACHE_HOME
