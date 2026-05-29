@@ -3067,7 +3067,7 @@ function showSkill(name: string = "qmd"): void {
   if (!skill) {
     throw new Error(`Skill '${name}' not found. Reinstall qmd or set QMD_SKILLS_DIR.`);
   }
-  console.log(`${name} Skill`);
+  console.log("QMD Skill");
   console.log("");
   const content = readSkillContent(skill);
   process.stdout.write(content.endsWith("\n") ? content : content + "\n");
@@ -3088,11 +3088,12 @@ function copyDirectoryContents(sourceDir: string, targetDir: string): void {
 }
 
 function installedSkillStubContent(name: string = "qmd"): string {
+  const showCmd = "qmd skill show" + (name === "qmd" ? "" : ` ${name}`);
   return `---
 name: ${name}
 description: Bootstrap QMD search instructions from the installed qmd CLI. Use when users ask to find notes, retrieve documents, inspect a wiki, or answer from indexed local markdown.
 license: MIT
-compatibility: Requires qmd CLI. Run \`qmd skill show ${name}\` for version-matched instructions.
+compatibility: Requires qmd CLI. Run \`${showCmd}\` for version-matched instructions.
 allowed-tools: Bash(qmd:*), mcp__qmd__*
 ---
 
@@ -3103,12 +3104,12 @@ when the qmd package updates.
 
 Load the full, version-matched QMD instructions from the CLI:
 
-!\`qmd skill show ${name}\`
+!\`${showCmd}\`
 
 If your agent does not support bang-command expansion, run:
 
 \`\`\`bash
-qmd skill show ${name}
+${showCmd}
 \`\`\`
 
 Then follow those instructions. In short: search first, fetch full sources with
@@ -3300,7 +3301,7 @@ async function shouldCreateClaudeSymlink(linkPath: string, autoYes: boolean): Pr
 async function installSkill(globalInstall: boolean, force: boolean, autoYes: boolean, name: string = "qmd"): Promise<void> {
   const installDir = getSkillInstallDir(globalInstall, name);
   writeSkillInstall(installDir, force, name);
-  console.log(`✓ Installed ${name} skill to ${installDir}`);
+  console.log(`✓ Installed QMD skill to ${installDir}`);
 
   const claudeLinkPath = getClaudeSkillLinkPath(globalInstall, name);
   if (!(await shouldCreateClaudeSymlink(claudeLinkPath, autoYes))) {
