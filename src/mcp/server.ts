@@ -161,6 +161,12 @@ async function buildInstructions(store: QMDStore): Promise<string> {
   lines.push("  - Use `minScore: 0.5` to filter low-confidence results.");
   lines.push("  - Results include a `context` field describing the content type.");
 
+  lines.push("");
+  lines.push("Memory (durable facts — separate from search collections):");
+  lines.push("  - `remember` — store a fact (user/feedback/project/reference). Reports near-duplicates.");
+  lines.push("  - `recall` — search memory, or session:true for the start-of-session snapshot.");
+  lines.push("  - `forget` — delete a fact by slug.");
+
   return lines.join("\n");
 }
 
@@ -531,6 +537,85 @@ Intent-aware lex (C++ performance, not sports):
         content: [{ type: "text", text: summary.join('\n') }],
         structuredContent: status,
       };
+    }
+  );
+
+  // ---------------------------------------------------------------------------
+  // Memory tools: remember / recall / forget
+  // ---------------------------------------------------------------------------
+
+  const MEMORY_TYPES_Z = z.enum(["user", "feedback", "project", "reference"]);
+
+  server.registerTool(
+    "remember",
+    {
+      title: "Remember",
+      description: "Store a durable fact in qmd memory (user/feedback/project/reference). Returns the slug; reports a near-duplicate instead of writing unless replace/force is set.",
+      annotations: { readOnlyHint: false, openWorldHint: false },
+      inputSchema: {
+        fact: z.string().describe("The fact to remember, as a self-contained sentence."),
+        type: MEMORY_TYPES_Z.optional().describe("user | feedback | project | reference (default: reference)"),
+        tags: z.array(z.string()).optional().describe("Optional tags to categorize the fact."),
+        project: z.string().optional().describe("Project name, or 'global' (default)."),
+        pin: z.boolean().optional().describe("Pin to always surface at session start."),
+        source: z.string().optional().describe("Where this fact came from."),
+        as: z.string().optional().describe("Explicit slug."),
+        replace: z.string().optional().describe("Slug to overwrite in place."),
+        force: z.boolean().optional().describe("Write even if a near-duplicate exists."),
+      },
+    },
+    async ({ fact, type, tags, project, pin, source, as: asSlug, replace, force }) => {
+      const { remember: rememberFn, memoryRoot } = await import("../memory.js");
+      const res = await rememberFn(store.internal, memoryRoot(), { fact, type, tags, project, pinned: pin, source, as: asSlug, replace, force });
+      const text = res.wrote
+        ? `Remembered '${res.slug}' (${res.type}).`
+        : `Not written — near-duplicate of '${res.duplicateOf}'. Pass replace:'${res.duplicateOf}' to update or force:true to add anyway.`;
+      return { content: [{ type: "text", text }], structuredContent: { ...res } };
+    }
+  );
+
+  server.registerTool(
+    "recall",
+    {
+      title: "Recall",
+      description: "Search qmd memory for relevant facts, or get the session snapshot (session:true).",
+      annotations: { readOnlyHint: true, openWorldHint: false },
+      inputSchema: {
+        query: z.string().optional().describe("Search query. Omit with session:true."),
+        session: z.boolean().optional().describe("Return the start-of-session snapshot instead of searching."),
+        type: MEMORY_TYPES_Z.optional(),
+        limit: z.number().optional().default(10).describe("Max results (default: 10)."),
+      },
+    },
+    async ({ query, session, type, limit }) => {
+      const { recallQuery: recallQueryFn, recallSession, memoryRoot } = await import("../memory.js");
+      const root = memoryRoot();
+      if (session) {
+        const snap = await recallSession(root, {});
+        return { content: [{ type: "text", text: snap || "(no memories)" }] };
+      }
+      if (!query) return { content: [{ type: "text", text: "Provide a query or session:true." }], isError: true };
+      const hits = await recallQueryFn(store.internal, root, query, { type, limit });
+      const text = hits.length ? hits.map(h => `[${h.type}] ${h.description} (${h.slug})`).join("\n") : "No memories found.";
+      return { content: [{ type: "text", text }], structuredContent: { hits } };
+    }
+  );
+
+  server.registerTool(
+    "forget",
+    {
+      title: "Forget",
+      description: "Delete a remembered fact by slug.",
+      annotations: { readOnlyHint: false, openWorldHint: false },
+      inputSchema: { slug: z.string().describe("Slug of the memory to delete.") },
+    },
+    async ({ slug }) => {
+      const { forget: forgetFn, memoryRoot } = await import("../memory.js");
+      const res = await forgetFn(store.internal, memoryRoot(), slug);
+      if (!res.removed) {
+        return { content: [{ type: "text", text: `No memory named '${slug}'.` }], structuredContent: { ...res }, isError: true };
+      }
+      return { content: [{ type: "text", text: `Forgot '${slug}'.` }], structuredContent: { ...res } };
     }
   );
 
