@@ -34,6 +34,11 @@ export function memoryFilePath(root: string, type: MemoryType, slug: string): st
   return join(root, type, `${slug}.md`);
 }
 
+/**
+ * Kebab-case slug, truncated to 60 chars on a word boundary.
+ * Returns "" when the input has no alphanumeric characters — callers that
+ * build file paths from the result must validate for empty.
+ */
 export function slugify(text: string): string {
   let s = text
     .toLowerCase()
@@ -46,6 +51,8 @@ export function slugify(text: string): string {
 }
 
 export function serializeMemory(fm: MemoryFrontmatter, body: string): string {
+  // Values are written unquoted; parseMemory is forgiving, but a strict YAML
+  // parser may reject values containing ':'. Acceptable for internal files.
   const lines = ["---"];
   lines.push(`name: ${fm.name}`);
   lines.push(`description: ${fm.description}`);
@@ -70,7 +77,7 @@ export function parseMemory(content: string): ParsedMemory {
     const end = trimmed.indexOf("\n---", 3);
     if (end >= 0) {
       const block = trimmed.slice(3, end).trim();
-      body = trimmed.slice(end + 4).replace(/^\r?\n/, "");
+      body = trimmed.slice(end + 4).replace(/^(\r?\n){1,2}/, "");
       for (const line of block.split(/\r?\n/)) {
         const m = line.match(/^([a-z_]+):\s*(.*)$/i);
         if (!m) continue;

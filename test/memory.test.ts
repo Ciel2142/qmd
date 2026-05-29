@@ -19,6 +19,10 @@ describe("slugify", () => {
     expect(s.length).toBeLessThanOrEqual(60);
     expect(s.endsWith("-")).toBe(false);
   });
+  test("returns empty string when no alphanumerics remain", () => {
+    expect(slugify("")).toBe("");
+    expect(slugify("!!!---???")).toBe("");
+  });
 });
 
 describe("serializeMemory / parseMemory round-trip", () => {
@@ -47,7 +51,7 @@ describe("serializeMemory / parseMemory round-trip", () => {
     const out = serializeMemory(fm, "The fact body.\n");
     const parsed = parseMemory(out);
     expect(parsed.frontmatter).toEqual(fm);
-    expect(parsed.body.trim()).toBe("The fact body.");
+    expect(parsed.body).toBe("The fact body.\n");
   });
 
   test("parse tolerates missing optional fields", () => {
