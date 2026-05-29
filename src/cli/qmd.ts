@@ -2906,16 +2906,16 @@ function parseCLI() {
   };
 }
 
-function getSkillInstallDir(globalInstall: boolean): string {
+export function getSkillInstallDir(globalInstall: boolean, name: string = "qmd"): string {
   return globalInstall
-    ? resolve(homedir(), ".agents", "skills", "qmd")
-    : resolve(getPwd(), ".agents", "skills", "qmd");
+    ? resolve(homedir(), ".agents", "skills", name)
+    : resolve(getPwd(), ".agents", "skills", name);
 }
 
-function getClaudeSkillLinkPath(globalInstall: boolean): string {
+export function getClaudeSkillLinkPath(globalInstall: boolean, name: string = "qmd"): string {
   return globalInstall
-    ? resolve(homedir(), ".claude", "skills", "qmd")
-    : resolve(getPwd(), ".claude", "skills", "qmd");
+    ? resolve(homedir(), ".claude", "skills", name)
+    : resolve(getPwd(), ".claude", "skills", name);
 }
 
 function pathExists(path: string): boolean {
@@ -3062,12 +3062,12 @@ function collectSkillFiles(skill: SkillInfo): { relativePath: string; content: s
   return files;
 }
 
-function showSkill(): void {
-  const skill = findSkill("qmd");
+function showSkill(name: string = "qmd"): void {
+  const skill = findSkill(name);
   if (!skill) {
-    throw new Error("QMD skill not found. Reinstall qmd or set QMD_SKILLS_DIR.");
+    throw new Error(`Skill '${name}' not found. Reinstall qmd or set QMD_SKILLS_DIR.`);
   }
-  console.log("QMD Skill");
+  console.log(`${name} Skill`);
   console.log("");
   const content = readSkillContent(skill);
   process.stdout.write(content.endsWith("\n") ? content : content + "\n");
@@ -3087,12 +3087,12 @@ function copyDirectoryContents(sourceDir: string, targetDir: string): void {
   }
 }
 
-function installedSkillStubContent(): string {
+function installedSkillStubContent(name: string = "qmd"): string {
   return `---
-name: qmd
+name: ${name}
 description: Bootstrap QMD search instructions from the installed qmd CLI. Use when users ask to find notes, retrieve documents, inspect a wiki, or answer from indexed local markdown.
 license: MIT
-compatibility: Requires qmd CLI. Run \`qmd skill show\` for version-matched instructions.
+compatibility: Requires qmd CLI. Run \`qmd skill show ${name}\` for version-matched instructions.
 allowed-tools: Bash(qmd:*), mcp__qmd__*
 ---
 
@@ -3103,12 +3103,12 @@ when the qmd package updates.
 
 Load the full, version-matched QMD instructions from the CLI:
 
-!\`qmd skill show\`
+!\`qmd skill show ${name}\`
 
 If your agent does not support bang-command expansion, run:
 
 \`\`\`bash
-qmd skill show
+qmd skill show ${name}
 \`\`\`
 
 Then follow those instructions. In short: search first, fetch full sources with
@@ -3116,7 +3116,7 @@ Then follow those instructions. In short: search first, fetch full sources with
 `;
 }
 
-function writeSkillInstall(targetDir: string, force: boolean): void {
+function writeSkillInstall(targetDir: string, force: boolean, name: string = "qmd"): void {
   if (pathExists(targetDir)) {
     if (!force) {
       throw new Error(`Skill already exists: ${targetDir} (use --force to replace it)`);
@@ -3124,13 +3124,13 @@ function writeSkillInstall(targetDir: string, force: boolean): void {
     removePath(targetDir);
   }
 
-  const skill = findSkill("qmd");
+  const skill = findSkill(name);
   if (!skill) {
-    throw new Error("QMD skill not found. Reinstall qmd or set QMD_SKILLS_DIR.");
+    throw new Error(`Skill '${name}' not found. Reinstall qmd or set QMD_SKILLS_DIR.`);
   }
 
   copyDirectoryContents(skill.dir, targetDir);
-  writeFileSync(resolve(targetDir, "SKILL.md"), installedSkillStubContent(), "utf-8");
+  writeFileSync(resolve(targetDir, "SKILL.md"), installedSkillStubContent(name), "utf-8");
 }
 
 function outputSkillsJson(payload: unknown): void {
@@ -3297,12 +3297,12 @@ async function shouldCreateClaudeSymlink(linkPath: string, autoYes: boolean): Pr
   }
 }
 
-async function installSkill(globalInstall: boolean, force: boolean, autoYes: boolean): Promise<void> {
-  const installDir = getSkillInstallDir(globalInstall);
-  writeSkillInstall(installDir, force);
-  console.log(`✓ Installed QMD skill to ${installDir}`);
+async function installSkill(globalInstall: boolean, force: boolean, autoYes: boolean, name: string = "qmd"): Promise<void> {
+  const installDir = getSkillInstallDir(globalInstall, name);
+  writeSkillInstall(installDir, force, name);
+  console.log(`✓ Installed ${name} skill to ${installDir}`);
 
-  const claudeLinkPath = getClaudeSkillLinkPath(globalInstall);
+  const claudeLinkPath = getClaudeSkillLinkPath(globalInstall, name);
   if (!(await shouldCreateClaudeSymlink(claudeLinkPath, autoYes))) {
     return;
   }
@@ -4708,15 +4708,16 @@ if (isMain) {
 
     case "skill": {
       const subcommand = cli.args[0];
+      const skillName = cli.args[1] ?? "qmd";
       switch (subcommand) {
         case "show": {
-          showSkill();
+          showSkill(skillName);
           break;
         }
 
         case "install": {
           try {
-            await installSkill(Boolean(cli.values.global), Boolean(cli.values.force), Boolean(cli.values.yes));
+            await installSkill(Boolean(cli.values.global), Boolean(cli.values.force), Boolean(cli.values.yes), skillName);
           } catch (error) {
             exitWithError(error);
           }
@@ -4725,11 +4726,11 @@ if (isMain) {
 
         case "help":
         case undefined: {
-          console.log("Usage: qmd skill <show|install> [options]");
+          console.log("Usage: qmd skill <show|install> [name] [options]");
           console.log("");
           console.log("Commands:");
-          console.log("  show                 Print the QMD skill");
-          console.log("  install              Install QMD skill into ./.agents/skills/qmd");
+          console.log("  show [name]          Print a skill (default: qmd)");
+          console.log("  install [name]       Install a skill into ./.agents/skills/<name> (default: qmd)");
           console.log("");
           console.log("Options:");
           console.log("  --global             Install into ~/.agents/skills/qmd");
