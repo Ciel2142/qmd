@@ -2708,6 +2708,71 @@ async function querySearch(query: string, opts: OutputOptions, _embedModel: stri
   }, { maxDuration: 10 * 60 * 1000, name: 'querySearch' });
 }
 
+// =============================================================================
+// Memory verb helpers (remember / recall / forget)
+// =============================================================================
+
+async function rememberCommand(args: string[], values: Record<string, any>): Promise<void> {
+  const { remember, memoryRoot } = await import("../memory.js");
+  const fact = args.join(" ").trim();
+  if (!fact) { console.error("Usage: qmd remember <fact> [--type T] [--tags a,b] [--pin] [--as slug] [--replace slug] [--source S] [--force]"); process.exit(1); }
+  const store = getStore();
+  try {
+    const res = await remember(store, memoryRoot(), {
+      fact,
+      type: values.type as any,
+      tags: values.tags ? String(values.tags).split(",").map((s: string) => s.trim()).filter(Boolean) : undefined,
+      pinned: !!values.pin,
+      project: values.project as string | undefined,
+      source: values.source as string | undefined,
+      as: values.as as string | undefined,
+      replace: values.replace as string | undefined,
+      force: !!values.force,
+    });
+    if (!res.wrote) {
+      console.log(`${c.yellow}Near-duplicate of '${res.duplicateOf}'.${c.reset} Use --replace ${res.duplicateOf} to update, or --force to add anyway.`);
+    } else {
+      console.log(`${c.green}✓${c.reset} remembered '${res.slug}' (${res.type}) → ${res.path}`);
+    }
+  } finally { closeDb(); }
+}
+
+async function recallCommand(args: string[], values: Record<string, any>, opts: OutputOptions): Promise<void> {
+  const { recallQuery, recallSession, memoryRoot } = await import("../memory.js");
+  const root = memoryRoot();
+  if (values.session) {
+    const { basename } = await import("node:path");
+    const out = await recallSession(root, { project: basename(getPwd()) });
+    if (out) console.log(out);
+    return;
+  }
+  const query = args.join(" ").trim();
+  if (!query) { console.error("Usage: qmd recall <query> [--lex] [--type T] [--limit N]\n       qmd recall --session"); process.exit(1); }
+  const store = getStore();
+  try {
+    const hits = await recallQuery(store, root, query, {
+      type: values.type as any,
+      limit: values.limit ? parseInt(String(values.limit), 10) : 10,
+      lexOnly: !!values.lex,
+    });
+    if (opts.format === "json") { console.log(JSON.stringify(hits, null, 2)); return; }
+    if (hits.length === 0) { console.log(`${c.dim}No memories found.${c.reset}`); return; }
+    for (const h of hits) console.log(`${c.cyan}[${h.type}]${c.reset} ${h.description} ${c.dim}(${h.slug})${c.reset}`);
+  } finally { closeDb(); }
+}
+
+async function forgetCommand(args: string[], _values: Record<string, any>): Promise<void> {
+  const { forget, memoryRoot } = await import("../memory.js");
+  const slug = args[0];
+  if (!slug) { console.error("Usage: qmd forget <slug>"); process.exit(1); }
+  const store = getStore();
+  try {
+    const res = await forget(store, memoryRoot(), slug);
+    if (res.removed) console.log(`${c.green}✓${c.reset} forgot '${slug}'`);
+    else { console.log(`${c.yellow}No memory named '${slug}'.${c.reset}`); process.exit(1); }
+  } finally { closeDb(); }
+}
+
 // Parse CLI arguments using util.parseArgs
 function parseCLI() {
   const { values, positionals } = parseArgs({
@@ -2765,6 +2830,18 @@ function parseCLI() {
       port: { type: "string" },
       // Daemon options
       interval: { type: "string" },  // seconds between watch checks
+      // Memory verbs
+      type: { type: "string" },
+      tags: { type: "string" },
+      pin: { type: "boolean" },
+      as: { type: "string" },
+      replace: { type: "string" },
+      session: { type: "boolean" },
+      list: { type: "boolean" },
+      lex: { type: "boolean" },
+      limit: { type: "string" },
+      project: { type: "string" },
+      source: { type: "string" },
     },
     allowPositionals: true,
     strict: false, // Allow unknown options to pass through
@@ -3338,6 +3415,13 @@ function showHelp(): void {
   console.log("  --json/--csv/--md/--xml/--files - Same formats as search");
   console.log("");
   console.log(`Index: ${getDbPath()}`);
+  console.log("");
+  console.log("Memory:");
+  console.log("  qmd remember <fact> [--type user|feedback|project|reference] [--tags a,b]");
+  console.log("                      [--pin] [--as slug] [--replace slug] [--source S] [--force]");
+  console.log("  qmd recall <query> [--lex] [--type T] [--limit N]   - search memory");
+  console.log("  qmd recall --session                                - session snapshot (for hooks)");
+  console.log("  qmd forget <slug>                                   - delete a memory");
 }
 
 function doctorCheck(label: string, ok: boolean, details: string): void {
@@ -4691,6 +4775,16 @@ if (isMain) {
       closeDb();
       break;
     }
+
+    case "remember":
+      await rememberCommand(cli.args, cli.values);
+      break;
+    case "recall":
+      await recallCommand(cli.args, cli.values, cli.opts);
+      break;
+    case "forget":
+      await forgetCommand(cli.args, cli.values);
+      break;
 
     default:
       console.error(`Unknown command: ${cli.command}`);
