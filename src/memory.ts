@@ -208,7 +208,13 @@ export async function remember(
     const top = hits[0];
     if (top !== undefined && top.score > DEDUP_SCORE_FTS) {
       const dupSlug = slugFromFilepath(top.filepath);
-      return { wrote: false, slug: dupSlug, path: top.filepath, type, duplicateOf: dupSlug };
+      // searchFTS returns a virtual "qmd://memory/<type>/<slug>.md" path; resolve
+      // it back to a real filesystem path and the hit's actual type so the return
+      // shape matches the Tier-1 (file-existence) branch.
+      const stripped = top.filepath.startsWith("qmd://") ? top.filepath.slice(6) : top.filepath;
+      const dupType = (stripped.split("/").slice(-2, -1)[0] ?? type) as MemoryType;
+      const dupPath = memoryFilePath(root, dupType, dupSlug);
+      return { wrote: false, slug: dupSlug, path: dupPath, type: dupType, duplicateOf: dupSlug };
     }
   }
   const fm: MemoryFrontmatter = {
