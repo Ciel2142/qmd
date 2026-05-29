@@ -305,11 +305,37 @@ describe("CLI Skills", () => {
 
     const installedSkillDir = join(installDir, ".agents", "skills", "qmd");
     const installed = readFileSync(join(installedSkillDir, "SKILL.md"), "utf8");
-    expect(installed).toContain("# QMD - Query Markdown Documents");
+    expect(installed).toContain("# qmd skill: qmd");
     expect(installed).toContain("!`qmd skill show`");
-    expect(installed).toContain("qmd get");
+    // The default qmd source skill's own description flows into the stub frontmatter.
+    expect(installed).toContain("Search local markdown knowledge bases");
     expect(installed).not.toContain("## MCP Tool: `query`");
     expect(readFileSync(join(installedSkillDir, "references", "mcp-setup.md"), "utf8")).toContain("# QMD MCP Server Setup");
+  });
+
+  test("skill install uses the source description and a neutral body for non-search skills", async () => {
+    const installDir = join(testDir, "skill-install-memory-target");
+    await mkdir(installDir, { recursive: true });
+
+    const { stdout, stderr, exitCode } = await runQmd(["skill", "install", "qmd-memory", "--yes"], { cwd: installDir });
+    expect(stderr).toBe("");
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain("Installed QMD skill");
+
+    const installedSkillDir = join(installDir, ".agents", "skills", "qmd-memory");
+    const installed = readFileSync(join(installedSkillDir, "SKILL.md"), "utf8");
+
+    // Frontmatter description must come from the SOURCE qmd-memory skill, not the search skill.
+    expect(installed).toContain("remember");
+    expect(installed).toContain("recall");
+    expect(installed).toContain("durable knowledge");
+
+    // Must NOT mis-advertise itself as the search skill.
+    expect(installed).not.toContain("Bootstrap QMD search instructions");
+    expect(installed).not.toContain("fetch full sources");
+
+    // Still a thin bootstrap that bang-expands the version-matched memory skill.
+    expect(installed).toContain("!`qmd skill show qmd-memory`");
   });
 });
 
@@ -381,7 +407,7 @@ describe("CLI Skill Commands", () => {
 
     const skillDir = join(projectDir, ".agents", "skills", "qmd");
     const installed = readFileSync(join(skillDir, "SKILL.md"), "utf-8");
-    expect(installed).toContain("# QMD - Query Markdown Documents");
+    expect(installed).toContain("# qmd skill: qmd");
     expect(installed).toContain("!`qmd skill show`");
     expect(existsSync(join(projectDir, ".claude", "skills", "qmd"))).toBe(false);
     expect(stdout).toContain(`✓ Installed QMD skill to ${skillDir}`);

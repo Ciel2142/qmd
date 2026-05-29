@@ -3087,22 +3087,22 @@ function copyDirectoryContents(sourceDir: string, targetDir: string): void {
   }
 }
 
-function installedSkillStubContent(name: string = "qmd"): string {
+function installedSkillStubContent(name: string, description: string): string {
   const showCmd = "qmd skill show" + (name === "qmd" ? "" : ` ${name}`);
   return `---
 name: ${name}
-description: Bootstrap QMD search instructions from the installed qmd CLI. Use when users ask to find notes, retrieve documents, inspect a wiki, or answer from indexed local markdown.
+description: ${description}
 license: MIT
 compatibility: Requires qmd CLI. Run \`${showCmd}\` for version-matched instructions.
 allowed-tools: Bash(qmd:*), mcp__qmd__*
 ---
 
-# QMD - Query Markdown Documents
+# qmd skill: ${name}
 
 This installed skill is intentionally a small bootstrap so it does not go stale
 when the qmd package updates.
 
-Load the full, version-matched QMD instructions from the CLI:
+Load the full, version-matched ${name} instructions from the CLI:
 
 !\`${showCmd}\`
 
@@ -3112,8 +3112,7 @@ If your agent does not support bang-command expansion, run:
 ${showCmd}
 \`\`\`
 
-Then follow those instructions. In short: search first, fetch full sources with
-\`qmd get\` or \`qmd multi-get\`, and answer from retrieved text rather than snippets.
+Then follow those instructions.
 `;
 }
 
@@ -3131,7 +3130,7 @@ function writeSkillInstall(targetDir: string, force: boolean, name: string = "qm
   }
 
   copyDirectoryContents(skill.dir, targetDir);
-  writeFileSync(resolve(targetDir, "SKILL.md"), installedSkillStubContent(name), "utf-8");
+  writeFileSync(resolve(targetDir, "SKILL.md"), installedSkillStubContent(name, skill.description), "utf-8");
 }
 
 function outputSkillsJson(payload: unknown): void {
