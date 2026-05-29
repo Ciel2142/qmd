@@ -175,6 +175,13 @@ describe2("recallSession", () => {
     expect2(out).toContain("build with bun");
   });
 
+  test2("includes global project facts regardless of current project", async () => {
+    await wf(j(memDir, "project", "global-tip.md"), serializeMemory(
+      { name: "global-tip", description: "A global tip", type: "project", tags: [], project: "global", created: "2026-05-05", pinned: false }, "Applies everywhere."));
+    const out = await recallSession(memDir, { project: "some-other-project" });
+    expect2(out).toContain("A global tip");
+  });
+
   test2("respects the byte budget", async () => {
     const out = await recallSession(memDir, { project: "memory", budgetBytes: 40 });
     expect2(Buffer.byteLength(out, "utf-8")).toBeLessThanOrEqual(120); // header + truncation note
