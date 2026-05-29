@@ -2093,6 +2093,26 @@ describe("Snippet Extraction", () => {
     expect(linesAfter).toBe(2);   // Fourth, Fifth
   });
 
+  test("extractSnippet with leading blank/frontmatter lines reports 1 before, not 0", () => {
+    // Regression: a user looked at `@@ -2,4 @@ (1 before, 72 after)` and
+    // suspected "1 before" was wrong because the match appeared to be the
+    // topmost visible line. The math takes "before" from the absolute file
+    // line, not from the visible portion of the snippet — so when the
+    // snippet starts at line 2, "1 before" is the correct count. Lock that
+    // in with a 77-line document whose match sits on line 3.
+    const otherLines = Array.from({ length: 72 }, (_, i) => `body line ${i + 6}`).join("\n");
+    const body = `---\ntitle: Notes\n# Heading with keyword\nIntro paragraph.\nMore intro lines.\n${otherLines}`;
+
+    const { line, linesBefore, snippetLines, linesAfter, snippet } =
+      extractSnippet(body, "keyword", 500);
+
+    expect(line).toBe(3);             // match is on line 3
+    expect(linesBefore).toBe(1);      // exactly one line above the 4-line snippet window
+    expect(snippetLines).toBe(4);     // lines 2..5 form the snippet
+    expect(linesAfter).toBe(72);      // remaining body
+    expect(snippet).toContain("@@ -2,4 @@ (1 before, 72 after)");
+  });
+
   test("extractSnippet at document end shows 0 after", () => {
     const body = "First\nSecond\nThird\nFourth\nFifth keyword";
     const { linesBefore, linesAfter, snippetLines, line } = extractSnippet(body, "keyword", 500);

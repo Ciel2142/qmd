@@ -378,20 +378,29 @@ Intent-aware lex (C++ performance, not sports):
       description: "Retrieve the full content of a document by its file path or docid. Use paths or docids (#abc123) from search results. Suggests similar files if not found.",
       annotations: { readOnlyHint: true, openWorldHint: false },
       inputSchema: {
-        file: z.string().describe("File path or docid from search results (e.g., 'pages/meeting.md', '#abc123', or 'pages/meeting.md:100' to start at line 100)"),
+        file: z.string().describe("File path or docid from search results. Supports a line-range suffix: 'pages/meeting.md:100' starts at line 100; 'pages/meeting.md:100:40' (or '#abc123:100:40') reads 40 lines from line 100."),
         fromLine: z.number().optional().describe("Start from this line number (1-indexed)"),
         maxLines: z.number().optional().describe("Maximum number of lines to return"),
-        lineNumbers: z.boolean().optional().default(false).describe("Add line numbers to output (format: 'N: content')"),
+        lineNumbers: z.boolean().optional().default(true).describe("Add line numbers to output (format: 'N: content'). On by default; set false for raw content."),
       },
     },
     async ({ file, fromLine, maxLines, lineNumbers }) => {
-      // Support :line suffix in `file` (e.g. "foo.md:120") when fromLine isn't provided
+      // Support :line and :from:count suffixes in `file` (e.g. "foo.md:120" or
+      // "foo.md:120:40"). Explicit fromLine/maxLines args take precedence.
       let parsedFromLine = fromLine;
+      let parsedMaxLines = maxLines;
       let lookup = file;
-      const colonMatch = lookup.match(/:(\d+)$/);
-      if (colonMatch && colonMatch[1] && parsedFromLine === undefined) {
-        parsedFromLine = parseInt(colonMatch[1], 10);
-        lookup = lookup.slice(0, -colonMatch[0].length);
+      const rangeMatch = lookup.match(/:(\d+):(\d+)$/);
+      if (rangeMatch) {
+        if (parsedFromLine === undefined) parsedFromLine = parseInt(rangeMatch[1]!, 10);
+        if (parsedMaxLines === undefined) parsedMaxLines = parseInt(rangeMatch[2]!, 10);
+        lookup = lookup.slice(0, -rangeMatch[0].length);
+      } else {
+        const colonMatch = lookup.match(/:(\d+)$/);
+        if (colonMatch && colonMatch[1] && parsedFromLine === undefined) {
+          parsedFromLine = parseInt(colonMatch[1], 10);
+          lookup = lookup.slice(0, -colonMatch[0].length);
+        }
       }
       if (parsedFromLine !== undefined) parsedFromLine = Math.max(1, parsedFromLine);
 
@@ -408,7 +417,7 @@ Intent-aware lex (C++ performance, not sports):
         };
       }
 
-      const body = await store.getDocumentBody(result.filepath, { fromLine: parsedFromLine, maxLines }) ?? "";
+      const body = await store.getDocumentBody(result.filepath, { fromLine: parsedFromLine, maxLines: parsedMaxLines }) ?? "";
       let text = body;
       if (lineNumbers) {
         const startLine = parsedFromLine || 1;
@@ -447,7 +456,7 @@ Intent-aware lex (C++ performance, not sports):
         pattern: z.string().describe("Glob pattern or comma-separated list of file paths"),
         maxLines: z.number().optional().describe("Maximum lines per file"),
         maxBytes: z.number().optional().default(10240).describe("Skip files larger than this (default: 10240 = 10KB)"),
-        lineNumbers: z.boolean().optional().default(false).describe("Add line numbers to output (format: 'N: content')"),
+        lineNumbers: z.boolean().optional().default(true).describe("Add line numbers to output (format: 'N: content'). On by default; set false for raw content."),
       },
     },
     async ({ pattern, maxLines, maxBytes, lineNumbers }) => {
