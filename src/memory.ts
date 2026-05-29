@@ -5,7 +5,7 @@
  */
 import { join } from "node:path";
 import { homedir } from "node:os";
-import { mkdirSync, writeFileSync, existsSync } from "node:fs";
+import { mkdirSync, writeFileSync, existsSync, readdirSync, readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { reindexCollection, type Store } from "./store.js";
 
@@ -237,4 +237,63 @@ export async function remember(
   gitCommit(root, `remember: ${slug}`);
 
   return { wrote: true, slug, path, type };
+}
+
+// =============================================================================
+// recallSession() — filesystem-only budgeted session snapshot (no Store, no model)
+// =============================================================================
+
+export interface SessionOptions {
+  project?: string;      // current project name (cwd basename); "global" facts always included
+  projectLimit?: number; // max project facts (default 5)
+  budgetBytes?: number;  // hard cap on output size (default 2000)
+}
+
+function readType(root: string, type: MemoryType): ParsedMemory[] {
+  const dir = join(root, type);
+  if (!existsSync(dir)) return [];
+  const out: ParsedMemory[] = [];
+  for (const f of readdirSync(dir)) {
+    if (!f.endsWith(".md")) continue;
+    try { out.push(parseMemory(readFileSync(join(dir, f), "utf-8"))); } catch { /* skip unreadable */ }
+  }
+  return out;
+}
+
+/** Filesystem-only session snapshot. No Store, no model — instant and deterministic. */
+export async function recallSession(root: string, opts: SessionOptions = {}): Promise<string> {
+  const projectLimit = opts.projectLimit ?? 5;
+  const budget = opts.budgetBytes ?? 2000;
+  const curProject = opts.project ?? "global";
+
+  const users = readType(root, "user");
+  const feedback = readType(root, "feedback");
+  const pinned = [...readType(root, "project"), ...readType(root, "reference")].filter(m => m.frontmatter.pinned);
+  const projects = readType(root, "project")
+    .filter(m => !m.frontmatter.pinned && (m.frontmatter.project === curProject || m.frontmatter.project === "global"))
+    .sort((a, b) => (b.frontmatter.created).localeCompare(a.frontmatter.created))
+    .slice(0, projectLimit);
+
+  if (users.length + feedback.length + pinned.length + projects.length === 0) return "";
+
+  const lines: string[] = ["## Memory (qmd)"];
+  let truncated = 0;
+  const withBody = (m: ParsedMemory, label: string) => {
+    const block = `[${label}] ${m.frontmatter.description}\n  ${m.body.trim().replace(/\n/g, "\n  ")}`;
+    if (Buffer.byteLength(lines.concat(block).join("\n"), "utf-8") > budget) { truncated++; return; }
+    lines.push(block);
+  };
+  const oneLine = (m: ParsedMemory, label: string) => {
+    const block = `[${label}] ${m.frontmatter.description} (${m.frontmatter.name})`;
+    if (Buffer.byteLength(lines.concat(block).join("\n"), "utf-8") > budget) { truncated++; return; }
+    lines.push(block);
+  };
+
+  users.forEach(m => withBody(m, "user"));
+  feedback.forEach(m => withBody(m, "feedback"));
+  pinned.forEach(m => oneLine(m, `pinned:${m.frontmatter.type}`));
+  projects.forEach(m => oneLine(m, `project:${curProject}`));
+
+  if (truncated > 0) lines.push(`(${truncated} more — \`qmd recall\` to see)`);
+  return lines.join("\n");
 }

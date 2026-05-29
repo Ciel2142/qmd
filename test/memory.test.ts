@@ -70,6 +70,12 @@ describe("memoryFilePath", () => {
   });
 });
 
+import { recallSession } from "../src/memory.js";
+import { writeFile as wf, mkdir as md, mkdtemp as mkd, rm as rmrf } from "node:fs/promises";
+import { tmpdir as tmp } from "node:os";
+import { join as j } from "node:path";
+// NOTE: serializeMemory is already imported in the Task A1 block at the top of this file — do not re-import.
+
 import { describe as describe2, test as test2, expect as expect2, beforeEach, afterEach } from "vitest";
 import { mkdtemp, rm, readFile, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -137,5 +143,49 @@ describe2("remember", () => {
     expect2(b.slug).toBe("my-fact");
     const text = await readFile(b.path, "utf-8");
     expect2(text).toContain("new fact");
+  });
+});
+
+describe2("recallSession", () => {
+  let memDir: string;
+  beforeEach(async () => {
+    memDir = await mkd(j(tmp(), "qmd-sess-"));
+    for (const t of ["user", "feedback", "project", "reference"]) await md(j(memDir, t), { recursive: true });
+    await wf(j(memDir, "user", "who.md"), serializeMemory(
+      { name: "who", description: "User is Igor, backend eng", type: "user", tags: [], project: "global", created: "2026-05-01", pinned: false }, "User is Igor, a backend engineer."));
+    await wf(j(memDir, "feedback", "terse.md"), serializeMemory(
+      { name: "terse", description: "Prefers terse answers", type: "feedback", tags: [], project: "global", created: "2026-05-02", pinned: false }, "Be terse. **Why:** saves time."));
+    await wf(j(memDir, "reference", "long.md"), serializeMemory(
+      { name: "long", description: "A reference fact", type: "reference", tags: [], project: "global", created: "2026-05-03", pinned: false }, "Some reference detail."));
+    await wf(j(memDir, "project", "thisrepo.md"), serializeMemory(
+      { name: "thisrepo", description: "build with bun", type: "project", tags: [], project: "memory", created: "2026-05-04", pinned: false }, "Build with bun."));
+  });
+  afterEach(async () => { await rmrf(memDir, { recursive: true, force: true }); });
+
+  test2("includes user + feedback, excludes reference", async () => {
+    const out = await recallSession(memDir, { project: "other" });
+    expect2(out).toContain("[user]");
+    expect2(out).toContain("[feedback]");
+    expect2(out).toContain("Be terse");
+    expect2(out).not.toContain("A reference fact");
+  });
+
+  test2("includes project facts matching current project", async () => {
+    const out = await recallSession(memDir, { project: "memory" });
+    expect2(out).toContain("build with bun");
+  });
+
+  test2("respects the byte budget", async () => {
+    const out = await recallSession(memDir, { project: "memory", budgetBytes: 40 });
+    expect2(Buffer.byteLength(out, "utf-8")).toBeLessThanOrEqual(120); // header + truncation note
+    expect2(out).toContain("more —");
+  });
+
+  test2("returns empty string when no memories exist", async () => {
+    const empty = await mkd(j(tmp(), "qmd-sess-empty-"));
+    for (const t of ["user", "feedback", "project", "reference"]) await md(j(empty, t), { recursive: true });
+    const out = await recallSession(empty, { project: "x" });
+    expect2(out).toBe("");
+    await rmrf(empty, { recursive: true, force: true });
   });
 });
