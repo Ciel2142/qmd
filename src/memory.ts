@@ -325,10 +325,9 @@ function parseVirtualMemoryPath(filepath: string): { type: string; slug: string 
   return { type, slug };
 }
 
-export async function recallQuery(store: Store, query: string, opts: RecallOptions = {}): Promise<RecallHit[]> {
+export async function recallQuery(store: Store, root: string, query: string, opts: RecallOptions = {}): Promise<RecallHit[]> {
   const limit = opts.limit ?? 10;
 
-  const root = memoryRoot();
   let hits: RecallHit[];
 
   if (opts.lexOnly) {

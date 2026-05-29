@@ -220,7 +220,7 @@ describe2("recallQuery + forget", () => {
 
   test2("recallQuery (lex) finds a remembered fact", async () => {
     await remember(store, memDir, { fact: "MinIO console is on port 9010", type: "reference" });
-    const hits = await recallQuery(store, "MinIO console port", { lexOnly: true, limit: 5 });
+    const hits = await recallQuery(store, memDir, "MinIO console port", { lexOnly: true, limit: 5 });
     expect2(hits.some(h => h.description.includes("MinIO") || h.path.includes("minio"))).toBe(true);
   });
 
