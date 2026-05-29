@@ -196,3 +196,46 @@ describe2("recallSession", () => {
     await rmrf(empty, { recursive: true, force: true });
   });
 });
+
+import { recallQuery, forget } from "../src/memory.js";
+
+describe2("recallQuery + forget", () => {
+  let dir: string, memDir: string, cfgDir: string, store: Store;
+  beforeEach(async () => {
+    _resetProductionModeForTesting();
+    dir = await mkdtemp(join2(tmpdir(), "qmd-rf-"));
+    memDir = join2(dir, "memory"); cfgDir = join2(dir, "config");
+    await mkdir(cfgDir, { recursive: true });
+    for (const t of ["user", "feedback", "project", "reference"]) await mkdir(join2(memDir, t), { recursive: true });
+    process.env.QMD_CONFIG_DIR = cfgDir; process.env.QMD_MEMORY_DIR = memDir;
+    await writeFile(join2(cfgDir, "index.yml"),
+      YAML.stringify({ collections: { memory: { path: memDir, pattern: "**/*.md" } } }));
+    store = createStore(join2(dir, "index.sqlite"));
+  });
+  afterEach(async () => {
+    store.close();
+    delete process.env.QMD_CONFIG_DIR; delete process.env.QMD_MEMORY_DIR;
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  test2("recallQuery (lex) finds a remembered fact", async () => {
+    await remember(store, memDir, { fact: "MinIO console is on port 9010", type: "reference" });
+    const hits = await recallQuery(store, "MinIO console port", { lexOnly: true, limit: 5 });
+    expect2(hits.some(h => h.description.includes("MinIO") || h.path.includes("minio"))).toBe(true);
+  });
+
+  test2("forget removes the file and drops it from lex search", async () => {
+    const r = await remember(store, memDir, { fact: "Ephemeral fact about Dolt", type: "project" });
+    const gone = await forget(store, memDir, r.slug);
+    expect2(gone.removed).toBe(true);
+    const { existsSync: ex } = await import("node:fs");
+    expect2(ex(r.path)).toBe(false);
+    const hits = store.searchFTS("Ephemeral Dolt", 5, "memory");   // ADAPTED: searchFTS (sync, positional) — internal Store has no searchLex
+    expect2(hits.length).toBe(0);
+  });
+
+  test2("forget on a missing slug returns removed:false", async () => {
+    const res = await forget(store, memDir, "no-such-slug");
+    expect2(res.removed).toBe(false);
+  });
+});

@@ -5,9 +5,9 @@
  */
 import { join } from "node:path";
 import { homedir } from "node:os";
-import { mkdirSync, writeFileSync, existsSync, readdirSync, readFileSync } from "node:fs";
+import { mkdirSync, writeFileSync, existsSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { spawnSync } from "node:child_process";
-import { reindexCollection, type Store } from "./store.js";
+import { reindexCollection, hybridQuery, type Store } from "./store.js";
 
 export type MemoryType = "user" | "feedback" | "project" | "reference";
 export const MEMORY_TYPES: MemoryType[] = ["user", "feedback", "project", "reference"];
@@ -296,4 +296,81 @@ export async function recallSession(root: string, opts: SessionOptions = {}): Pr
 
   if (truncated > 0) lines.push(`(${truncated} more — \`qmd recall\` to see)`);
   return lines.join("\n");
+}
+
+// =============================================================================
+// recallQuery() — FTS/hybrid search returning typed RecallHit[]
+// =============================================================================
+
+export interface RecallHit {
+  slug: string;
+  path: string;        // real filesystem path
+  type: MemoryType | string;
+  description: string;
+  score?: number;
+}
+
+export interface RecallOptions {
+  type?: MemoryType;  // scope to one folder
+  limit?: number;
+  lexOnly?: boolean;  // skip vec/rerank (fast, model-free)
+}
+
+/** Parse a virtual "qmd://memory/<type>/<slug>.md" filepath into {type, slug}. */
+function parseVirtualMemoryPath(filepath: string): { type: string; slug: string } {
+  const stripped = filepath.startsWith("qmd://") ? filepath.slice(6) : filepath;
+  const segs = stripped.split("/");
+  const slug = (segs.pop() ?? "").replace(/\.md$/, "");
+  const type = segs.pop() ?? "";
+  return { type, slug };
+}
+
+export async function recallQuery(store: Store, query: string, opts: RecallOptions = {}): Promise<RecallHit[]> {
+  const limit = opts.limit ?? 10;
+
+  const root = memoryRoot();
+  let hits: RecallHit[];
+
+  if (opts.lexOnly) {
+    // searchFTS returns SearchResult[] — uses .filepath and .title
+    const results = store.searchFTS(query, limit, MEMORY_COLLECTION);
+    hits = results.map(r => {
+      const { type, slug } = parseVirtualMemoryPath(r.filepath);
+      return { slug, type, path: memoryFilePath(root, (type || "reference") as MemoryType, slug), description: r.title ?? "", score: r.score };
+    });
+  } else {
+    // hybridQuery returns HybridQueryResult[] — uses .file (NOT .filepath) and .title
+    const results = await hybridQuery(store, query, { collection: MEMORY_COLLECTION, limit });
+    hits = results.map(r => {
+      const { type, slug } = parseVirtualMemoryPath(r.file);
+      return { slug, type, path: memoryFilePath(root, (type || "reference") as MemoryType, slug), description: r.title ?? "", score: r.score };
+    });
+  }
+
+  if (opts.type) hits = hits.filter(h => h.type === opts.type);
+
+  // Backfill description + canonical type from frontmatter for display.
+  return hits.map(h => {
+    try {
+      const fm = parseMemory(readFileSync(h.path, "utf-8")).frontmatter;
+      return { ...h, description: fm.description || h.description, type: fm.type };
+    } catch { return h; }
+  });
+}
+
+// =============================================================================
+// forget() — remove a memory file from disk and drop it from the index
+// =============================================================================
+
+export async function forget(store: Store, root: string, slug: string): Promise<{ removed: boolean; path?: string }> {
+  for (const type of MEMORY_TYPES) {
+    const path = memoryFilePath(root, type, slug);
+    if (existsSync(path)) {
+      rmSync(path);
+      await reindexMemory(store, root); // removed/orphaned files dropped from index
+      gitCommit(root, `forget: ${slug}`);
+      return { removed: true, path };
+    }
+  }
+  return { removed: false };
 }
