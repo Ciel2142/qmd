@@ -69,3 +69,73 @@ describe("memoryFilePath", () => {
     expect(memoryFilePath("/m", "feedback", "be-terse")).toBe("/m/feedback/be-terse.md");
   });
 });
+
+import { describe as describe2, test as test2, expect as expect2, beforeEach, afterEach } from "vitest";
+import { mkdtemp, rm, readFile, mkdir, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join as join2 } from "node:path";
+import YAML from "yaml";
+import { createStore, _resetProductionModeForTesting, type Store } from "../src/store.js";
+import { remember } from "../src/memory.js";
+
+describe2("remember", () => {
+  let dir: string, memDir: string, cfgDir: string, store: Store;
+
+  beforeEach(async () => {
+    _resetProductionModeForTesting();
+    dir = await mkdtemp(join2(tmpdir(), "qmd-mem-"));
+    memDir = join2(dir, "memory");
+    cfgDir = join2(dir, "config");
+    await mkdir(cfgDir, { recursive: true });
+    for (const t of ["user", "feedback", "project", "reference"]) {
+      await mkdir(join2(memDir, t), { recursive: true });
+    }
+    process.env.QMD_CONFIG_DIR = cfgDir;
+    process.env.QMD_MEMORY_DIR = memDir;
+    await writeFile(join2(cfgDir, "index.yml"),
+      YAML.stringify({ collections: { memory: { path: memDir, pattern: "**/*.md" } } }));
+    store = createStore(join2(dir, "index.sqlite"));
+  });
+
+  afterEach(async () => {
+    store.close();
+    delete process.env.QMD_CONFIG_DIR;
+    delete process.env.QMD_MEMORY_DIR;
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  test2("writes a typed file with frontmatter and returns slug+path", async () => {
+    const res = await remember(store, memDir, {
+      fact: "The deploy host is the Mac mini at 192.168.1.47",
+      type: "reference", tags: ["homelab"], source: "local-infra",
+    });
+    expect2(res.wrote).toBe(true);
+    expect2(res.path).toContain("/reference/");
+    const text = await readFile(res.path, "utf-8");
+    expect2(text).toContain("type: reference");
+    expect2(text).toContain("The deploy host is the Mac mini");
+  });
+
+  test2("makes the fact lex-searchable immediately (no embedding)", async () => {
+    await remember(store, memDir, { fact: "Redpanda Kafka API on port 9092", type: "project" });
+    const hits = store.searchFTS("Redpanda Kafka 9092", 5, "memory");
+    expect2(hits.length).toBeGreaterThan(0);
+  });
+
+  test2("dedup: near-duplicate is reported, not written, unless --force", async () => {
+    await remember(store, memDir, { fact: "Qdrant REST runs on port 6333", type: "reference" });
+    const dup = await remember(store, memDir, { fact: "Qdrant REST runs on port 6333", type: "reference" });
+    expect2(dup.wrote).toBe(false);
+    expect2(dup.duplicateOf).toBeTruthy();
+    const forced = await remember(store, memDir, { fact: "Qdrant REST runs on port 6333", type: "reference", force: true });
+    expect2(forced.wrote).toBe(true);
+  });
+
+  test2("--replace overwrites the named slug in place", async () => {
+    const a = await remember(store, memDir, { fact: "old fact", type: "user", as: "my-fact" });
+    const b = await remember(store, memDir, { fact: "new fact", type: "user", replace: a.slug });
+    expect2(b.slug).toBe("my-fact");
+    const text = await readFile(b.path, "utf-8");
+    expect2(text).toContain("new fact");
+  });
+});
