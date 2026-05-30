@@ -14,8 +14,14 @@ const tsxCli = join(projectRoot, "node_modules", "tsx", "dist", "cli.mjs");
 const cliArgs = isBunRuntime ? [CLI] : [tsxCli, CLI];
 
 function runCli(args: string[], env: Record<string, string>) {
+  // Scrub any ambient INDEX_PATH: other test files (eval*.test.ts) set it at
+  // module scope and, under bun's shared process, it leaks into here. Left in
+  // place it overrides the child's XDG_CACHE_HOME-derived index path. Callers
+  // can still pass INDEX_PATH explicitly via `env`.
+  const baseEnv = { ...process.env };
+  delete baseEnv.INDEX_PATH;
   return spawnSync(process.execPath, [...cliArgs, ...args], {
-    env: { ...process.env, ...env },
+    env: { ...baseEnv, ...env },
     encoding: "utf-8",
   });
 }

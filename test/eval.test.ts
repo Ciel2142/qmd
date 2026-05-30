@@ -20,9 +20,17 @@ import { createHash } from "crypto";
 import { fileURLToPath } from "url";
 import { dirname } from "path";
 
-// Set INDEX_PATH before importing store to prevent using global index
+// Use a temp index, not the global one. getDefaultDbPath() reads INDEX_PATH
+// lazily at createStore() time, so set it in beforeAll (not module scope) and
+// restore in afterAll. Module-scope writes leak into other files under bun's
+// shared test process (see qmd-jl4).
 const tempDir = mkdtempSync(join(tmpdir(), "qmd-eval-"));
-process.env.INDEX_PATH = join(tempDir, "eval.sqlite");
+let prevIndexPath: string | undefined;
+
+beforeAll(() => {
+  prevIndexPath = process.env.INDEX_PATH;
+  process.env.INDEX_PATH = join(tempDir, "eval.sqlite");
+});
 
 import {
   createStore,
@@ -412,5 +420,7 @@ describe.skipIf(!!process.env.CI)("Hybrid Search (RRF)", () => {
 afterAll(async () => {
   // Ensure native resources are released to avoid ggml-metal asserts on process exit.
   await disposeDefaultLlamaCpp();
+  if (prevIndexPath === undefined) delete process.env.INDEX_PATH;
+  else process.env.INDEX_PATH = prevIndexPath;
   rmSync(tempDir, { recursive: true, force: true });
 });
